@@ -8,7 +8,7 @@ interface StoryDisplayProps {
   isPaused: boolean;
   duration?: number;
   imageUrl: string | null;
-  isGeneratingImage: boolean;
+  isGeneratingStory: boolean;
 }
 
 export const StoryDisplay: React.FC<StoryDisplayProps> = ({ 
@@ -18,19 +18,26 @@ export const StoryDisplay: React.FC<StoryDisplayProps> = ({
   isPaused, 
   duration, 
   imageUrl, 
-  isGeneratingImage 
+  isGeneratingStory 
 }) => {
+
+  if (isGeneratingStory) {
+    return (
+      <div className="relative w-full h-[65vh] flex flex-col items-center justify-center bg-slate-800/50 rounded-lg p-6 border border-slate-700 shadow-inner overflow-hidden">
+        <div className="flex flex-col items-center justify-center animate-pulse">
+          <MagicWandIcon className="w-12 h-12 text-slate-500 mb-4" />
+          <p className="text-slate-400 font-medium text-xl font-serif">Generating your story and illustrations...</p>
+          <p className="text-slate-500 text-sm mt-2">This may take a moment.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative w-full h-[65vh] flex flex-col items-center justify-start bg-slate-800/50 rounded-lg p-6 border border-slate-700 shadow-inner overflow-hidden">
       {/* Image container */}
       <div className="relative w-full flex-1 min-h-0 mb-4 flex items-center justify-center">
-        {isGeneratingImage && (
-          <div className="w-full h-full flex flex-col items-center justify-center bg-slate-700/50 rounded-md animate-pulse">
-            <MagicWandIcon className="w-10 h-10 text-slate-500 mb-2" />
-            <p className="text-slate-400 font-medium">Conjuring an image...</p>
-          </div>
-        )}
-        {imageUrl && !isGeneratingImage && (
+        {imageUrl && (
           <img
             src={imageUrl}
             alt="A visual depiction of the current story line."

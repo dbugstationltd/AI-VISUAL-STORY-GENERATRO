@@ -2,16 +2,22 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { StoryInput } from './components/StoryInput';
 import { StoryDisplay } from './components/StoryDisplay';
 import { useStoryPlayer } from './hooks/useStoryPlayer';
-import { generateStory } from './services/geminiService';
+import { generateStory, generateImage } from './services/geminiService';
 import { splitIntoSentences } from './utils/textUtils';
 import { playSound } from './services/audioService';
 import { AnimationToggle } from './components/AnimationToggle';
 import { VoiceSelector } from './components/VoiceSelector';
 import { ttsService } from './services/ttsService';
 import { RateSlider } from './components/RateSlider';
+import { saveStory, loadStory, hasSavedStory } from './services/storageService';
+
+export type StoryLine = {
+  text: string;
+  imageUrl: string;
+};
 
 const App: React.FC = () => {
-  const [storyText, setStoryText] = useState<string>('');
+  const [storyLines, setStoryLines] = useState<StoryLine[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [isAnimationEnabled, setIsAnimationEnabled] = useState<boolean>(true);
@@ -19,8 +25,9 @@ const App: React.FC = () => {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>('');
   const [speechRate, setSpeechRate] = useState<number>(1);
+  const [isStorySaved, setIsStorySaved] = useState<boolean>(false);
+  const [saveButtonText, setSaveButtonText] = useState<string>('Save Story');
   
-  const lines = React.useMemo(() => splitIntoSentences(storyText), [storyText]);
   const { 
     currentLine, 
     isPlaying, 
@@ -32,11 +39,11 @@ const App: React.FC = () => {
     isVisible,
     duration,
     imageUrl,
-    isGeneratingImage,
-  } = useStoryPlayer(lines);
+  } = useStoryPlayer(storyLines);
 
-  // Fetch available voices on component mount
+  // Fetch available voices and check for saved story on component mount
   useEffect(() => {
+    setIsStorySaved(hasSavedStory());
     const fetchVoices = async () => {
       try {
         const availableVoices = await ttsService.getVoices();
@@ -59,29 +66,50 @@ const App: React.FC = () => {
     if (isPlaying) {
       stop();
     }
+    setStoryLines([]); // Clear old story immediately
+    setSaveButtonText('Save Story'); // Reset save button text
+
     try {
       const prompt = "Write a short, enchanting fantasy story for children in about 3-4 sentences.";
-      const newStory = await generateStory(prompt);
-      setStoryText(newStory);
-      setStartPlayback(true); // Flag to start playback after state update
+      const newStoryText = await generateStory(prompt);
+      const storySentences = splitIntoSentences(newStoryText);
+
+      if (storySentences.length === 0) {
+        throw new Error("Generated story was empty.");
+      }
+      
+      const imagePromises = storySentences.map(sentence => {
+        const imagePrompt = `A whimsical, enchanting, and vibrant illustration for a children's storybook, in a cinematic 16:9 aspect ratio. The scene depicts: ${sentence}`;
+        return generateImage(imagePrompt);
+      });
+
+      const imageUrls = await Promise.all(imagePromises);
+
+      const newStoryLines = storySentences.map((sentence, index) => ({
+        text: sentence,
+        imageUrl: imageUrls[index],
+      }));
+
+      setStoryLines(newStoryLines);
+      setStartPlayback(true);
       playSound('generateSuccess');
+
     } catch (err) {
-      console.error("Failed to generate story:", err);
-      setError("Sorry, I couldn't write a story right now. Please try again.");
+      console.error("Failed to generate story and images:", err);
+      setError("Sorry, I couldn't create a story right now. Please try again.");
       setStartPlayback(false);
     } finally {
-      // isLoading is set to false after a delay to allow the `start` effect to fire
-      setTimeout(() => setIsLoading(false), 200);
+      setIsLoading(false);
     }
   }, [isPlaying, stop]);
 
   useEffect(() => {
     // Starts playback automatically once a new story is generated and its lines are processed
-    if (startPlayback && lines.length > 0) {
+    if (startPlayback && storyLines.length > 0) {
       start();
       setStartPlayback(false);
     }
-  }, [startPlayback, lines, start]);
+  }, [startPlayback, storyLines, start]);
 
 
   useEffect(() => {
@@ -106,6 +134,32 @@ const App: React.FC = () => {
   const handlePreviewVoice = useCallback((voiceURI: string) => {
     ttsService.speakPreview('This is a sample narration.', voiceURI);
   }, []);
+  
+  const handleSaveStory = useCallback(() => {
+    if (storyLines.length > 0) {
+      saveStory(storyLines);
+      setIsStorySaved(true);
+      setSaveButtonText('Saved!');
+      playSound('generateSuccess');
+      setTimeout(() => {
+        setSaveButtonText('Save Story');
+      }, 2500);
+    }
+  }, [storyLines]);
+
+  const handleLoadStory = useCallback(() => {
+    stop(); // Ensure everything is reset before loading
+    const loadedStory = loadStory();
+    if (loadedStory && loadedStory.length > 0) {
+      setStoryLines(loadedStory);
+      setStartPlayback(true);
+      setError(null);
+      setSaveButtonText('Save Story');
+    } else {
+      setError("Could not load the saved story. It might be corrupted.");
+      setIsStorySaved(false); // Update state if loading fails
+    }
+  }, [stop]);
 
 
   return (
@@ -131,7 +185,7 @@ const App: React.FC = () => {
           isPaused={isPaused}
           duration={duration}
           imageUrl={imageUrl}
-          isGeneratingImage={isGeneratingImage}
+          isGeneratingStory={isLoading}
         />
 
         <div className="w-full max-w-lg flex flex-col items-center">
@@ -140,21 +194,26 @@ const App: React.FC = () => {
             onPause={pause}
             onResume={resume}
             onGenerate={handleGenerateStory}
+            onSave={handleSaveStory}
+            onLoad={handleLoadStory}
             isPlaying={isPlaying}
             isPaused={isPaused}
             isLoading={isLoading}
+            isStorySaved={isStorySaved}
+            saveButtonText={saveButtonText}
+            hasStory={storyLines.length > 0}
           />
           <VoiceSelector
             voices={voices}
             selectedVoiceURI={selectedVoiceURI}
             onVoiceChange={handleVoiceChange}
             onPreviewVoice={handlePreviewVoice}
-            disabled={isPlaying}
+            disabled={isPlaying || isLoading}
           />
           <RateSlider
             rate={speechRate}
             onRateChange={handleRateChange}
-            disabled={isPlaying}
+            disabled={isPlaying || isLoading}
           />
         </div>
 
