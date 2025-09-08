@@ -1,0 +1,5 @@
+{
+  "name": "Visual Storyteller AI",
+  "description": "An application that transforms paragraphs into a line-by-line visual storybook experience. Users can input their own text or generate a new story with AI, and watch it unfold with timed, animated transitions for each line.",
+  "requestFramePermissions": []
+}
